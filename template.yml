@@ -462,6 +462,7 @@ Resources:
       DeploymentId: !Ref APIGatewayDeployment
       RestApiId: !Ref APIGatewayRestAPI
       StageName: 'prod'
+      MetricsEnabled: true
       TracingEnabled: true
     DependsOn:
       - APIGatewayDeployment
