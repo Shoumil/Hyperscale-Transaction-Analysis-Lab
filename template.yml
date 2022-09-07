@@ -1,0 +1,871 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  EventStreamWriter:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamo = new AWS.DynamoDB.DocumentClient();
+          /**
+          * Demonstrates a simple HTTP endpoint using API Gateway. You have full
+          * access to the request and response payload, including headers and
+          * status code.
+          *
+          * To scan a DynamoDB table, make a GET request with the TableName as a
+          * query string parameter. To put, update, or delete an item, make a POST,
+          * PUT, or DELETE request respectively, passing in the payload to the
+          * DynamoDB API as a JSON body.
+          */
+          exports.handler = async (event, context) => {
+          //console.log('Received event:', JSON.stringify(event, null, 2));
+
+          let body;
+          let statusCode = '200';
+          const headers = {
+            'Content-Type': 'application/json',
+          };
+
+          try {
+          switch (event.httpMethod) {
+            case 'DELETE':
+                body = await dynamo.delete(JSON.parse(event.body)).promise();
+                break;
+            case 'GET':
+                body = await dynamo.scan({ TableName: event.queryStringParameters.TableName }).promise();
+                break;
+            case 'POST':
+                body = await dynamo.put(JSON.parse(event.body)).promise();
+                break;
+            case 'PUT':
+                body = await dynamo.update(JSON.parse(event.body)).promise();
+                break;
+            default:
+                throw new Error(`Unsupported method "${event.httpMethod}"`);
+            }
+          } catch (err) {
+            statusCode = '400';
+            body = err.message;
+          } finally {
+          body = JSON.stringify(body);
+          }
+          return {
+            statusCode,
+            body,
+            headers,
+          };
+          };
+
+      FunctionName:
+        Ref: LambdaEventStreamWriter
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+      Timeout: 180
+    DependsOn:
+      - DynamoDBTable
+  TripReader: 
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: 
+          Ref: S3BucketName
+        S3Key: 'TripReader.zip'
+      FunctionName:
+        Ref: LambdaTripReader
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+      Timeout: 180
+    DependsOn:
+      - DynamoDBTable
+  TripEventWriter:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: 
+          Ref: S3BucketName
+        S3Key: 'TripEventWriter.zip'
+      FunctionName:
+        Ref: LambdaTripEventWriter
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+      Timeout: 180
+    DependsOn:
+      - DynamoDBTable
+  TripWriter:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: 
+          Ref: S3BucketName
+        S3Key: 'TripWriter.zip'
+      FunctionName:
+        Ref: LambdaTripWriter
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+      Timeout: 180
+    DependsOn:
+      - DynamoDBTable
+  TripDBWriter:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: 
+          Ref: S3BucketName
+        S3Key: 'TripDBWriter.zip'
+      FunctionName:
+        Ref: LambdaTripDBWriter
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: !GetAtt IAMRole.Arn
+      Timeout: 180
+      Layers: 
+        - !Sub "arn:aws:lambda:${AWS::Region}:580247275435:layer:LambdaInsightsExtension:21"
+    DependsOn:
+      - DynamoDBTable
+  LambdaTripReaderAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TripReader.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/GET/trip/{tripId}
+    DependsOn:
+      - APIGatewayMethodTripIdGet
+  LambdaTripEventWriterAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TripEventWriter.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/POST/trip/events
+    DependsOn:
+      - APIGatewayMethodEventsPost
+  LambdaTripWriterPUTAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TripWriter.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/PUT/trip
+    DependsOn:
+      - APIGatewayMethodPut
+  LambdaTripWriterPOSTAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TripWriter.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/POST/trip
+    DependsOn:
+      - APIGatewayMethod
+  LambdaEventStreamWriterTripIdAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt EventStreamWriter.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/ANY/trip/{id}
+    DependsOn:
+      - APIGatewayMethod
+      - APIGatewayMethodEventsPost
+      - APIGatewayMethodTripIdGet
+  LambdaEventStreamWriterEventsAPIGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt EventStreamWriter.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGatewayRestAPI}/${EnvironmentName}/ANY/trip/events
+    DependsOn:
+      - APIGatewayMethod
+      - APIGatewayMethodEventsPost
+      - APIGatewayMethodTripIdGet
+  KinesisEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties: 
+      EventSourceArn: !GetAtt TripEventStream.Arn
+      FunctionName: 
+        Ref: LambdaTripDBWriter
+      StartingPosition: 'LATEST'
+    DependsOn:
+      - TripEventStream
+      - TripDBWriter
+  TripEventStream:
+    Type: AWS::Kinesis::Stream
+    Properties: 
+      Name: 
+        Ref: KinesisDataStreamTripEvents
+      RetentionPeriodHours: '24'
+      ShardCount: '4'
+      StreamModeDetails:
+        StreamMode: 'PROVISIONED'
+    DependsOn:
+      - IAMRole
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName:
+        Ref: DynamoDBTableName
+      AttributeDefinitions:
+        - AttributeName: 'tripId'
+          AttributeType: 'S'
+        - AttributeName: 'timestamp'
+          AttributeType: 'S'
+        - AttributeName: 'userId'
+          AttributeType: 'S'
+        - AttributeName: 'eventId'
+          AttributeType: 'S'
+        - AttributeName: 'eventType'
+          AttributeType: 'S'
+      GlobalSecondaryIndexes:
+        -
+          IndexName: 'user'
+          KeySchema: 
+            - AttributeName: 'userId'
+              KeyType: 'HASH'
+            - AttributeName: 'eventId'
+              KeyType: 'RANGE'
+          Projection:
+            ProjectionType: 'ALL'
+          ProvisionedThroughput:
+            ReadCapacityUnits: '5'
+            WriteCapacityUnits: '5'
+      KeySchema:
+        - AttributeName: 'tripId'
+          KeyType: 'HASH'
+        - AttributeName: 'timestamp'
+          KeyType: 'RANGE'
+      LocalSecondaryIndexes: 
+        -
+          IndexName: 'event'
+          KeySchema: 
+            - AttributeName: 'tripId'
+              KeyType: 'HASH'
+            - AttributeName: 'eventType'
+              KeyType: 'RANGE'
+          Projection: 
+            ProjectionType: 'ALL'
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+    DependsOn:
+      - IAMRole
+  APIGatewayRestAPI:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name:
+        Ref: APIName
+    DependsOn:
+      - EventStreamWriter
+  S3DataLake:
+    Type: 'AWS::S3::Bucket'
+    Properties: 
+      BucketName: 
+        Ref: S3DataLakeName
+    DependsOn:
+      - DynamoDBTable
+  TripEventDelivery:
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties: 
+      DeliveryStreamName: 
+        Ref: 'KinesisDataDeliveryTripEvent'
+      DeliveryStreamType: 'KinesisStreamAsSource'
+      KinesisStreamSourceConfiguration: 
+        KinesisStreamARN: !GetAtt TripEventStream.Arn
+        RoleARN: !GetAtt IAMRole.Arn
+      S3DestinationConfiguration: 
+        BucketARN: !GetAtt S3DataLake.Arn
+        BufferingHints: 
+          IntervalInSeconds: '300'
+          SizeInMBs: '5'
+        ErrorOutputPrefix: 'octank.telematics.tripevents-errors-'
+        Prefix: 'octank.telematics.tripevents-'
+        RoleARN: !GetAtt IAMRole.Arn
+    DependsOn:
+      - TripEventStream
+      - S3DataLake
+  APIGatewayResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart: 'trip'
+    DependsOn:
+      - APIGatewayRestAPI
+  APIGatewayResourceEvents:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt APIGatewayResource.ResourceId
+      PathPart: 'events'
+    DependsOn:
+      - APIGatewayResource
+  APIGatewayResourceTripId:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt APIGatewayResource.ResourceId
+      PathPart: '{tripId}'
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayResourceEvents
+  APIGatewayMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripWriterArn}/invocations
+          - LambdaTripWriterArn: !GetAtt TripWriter.Arn
+    DependsOn:
+      - APIGatewayResource
+  APIGatewayMethodPut:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripWriterArn}/invocations
+          - LambdaTripWriterArn: !GetAtt TripWriter.Arn
+    DependsOn:
+      - APIGatewayResource
+  APIGatewayMethodEventsPost:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResourceEvents
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripEventWriterArn}/invocations
+          - LambdaTripEventWriterArn: !GetAtt TripEventWriter.Arn
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayResourceEvents
+  APIGatewayMethodTripIdGet:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResourceTripId
+      HttpMethod: GET
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripReaderArn}/invocations
+          - LambdaTripReaderArn: !GetAtt TripReader.Arn
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayResourceEvents
+      - APIGatewayResourceTripId
+  APIGatewayMethodTripIdANY:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResourceTripId
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripReaderArn}/invocations
+          - LambdaTripReaderArn: !GetAtt EventStreamWriter.Arn
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayResourceEvents
+      - APIGatewayResourceTripId
+  APIGatewayMethodEventsANY:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResourceEvents
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Credentials: !GetAtt IAMRole.Arn
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaTripEventWriterArn}/invocations
+          - LambdaTripEventWriterArn: !GetAtt EventStreamWriter.Arn
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayResourceEvents
+  APIGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName:
+        Ref: EnvironmentName
+    DependsOn:
+      - APIGatewayMethod
+      - APIGatewayMethodTripIdANY
+  APIGatewayDeploymentStage:
+    Type: AWS::ApiGateway::Stage
+    Properties: 
+      DeploymentId: !Ref APIGatewayDeployment
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName: 'prod'
+      TracingEnabled: true
+    DependsOn:
+      - APIGatewayDeployment
+  APIGatewayPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt TripWriter.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+  CoordinatesModel:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Name: Coordinates
+      Schema:
+        title: Coordinates
+        type: object
+        properties:
+          latitude:
+            type: number
+          longitude:
+            type: number
+    DependsOn:
+      - APIGatewayResource
+      - APIGatewayRestAPI
+  TripModel:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Name: Trip
+      Schema:
+        title: trip
+        type: object
+        properties:
+          tripId:
+            type: string
+          userID:
+            type: string
+          tripEvents:
+            type: array
+            items: 
+              $ref: !Sub
+                - 'https://apigateway.amazonaws.com/restapis/${ApiId}/models/TripEvent'
+                - ApiId: !Ref APIGatewayRestAPI
+    DependsOn:
+      - TripEventModel
+      - APIGatewayRestAPI
+  TripEventModel:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Name: TripEvent
+      Schema:
+        title: tripEvent
+        type: object
+        properties:
+          eventId:
+            type: string
+          eventType:
+            type: string
+          coordinates: 
+            $ref: !Sub
+              - 'https://apigateway.amazonaws.com/restapis/${ApiId}/models/Coordinates'
+              - ApiId: !Ref APIGatewayRestAPI
+          timestamp:
+            type: string
+    DependsOn:
+      - CoordinatesModel
+      - APIGatewayRestAPI
+  TripEventsRequestModel:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Name: TripEventsRequest
+      Schema:
+        title: tripEventsRequest
+        type: object
+        properties:
+          tripId:
+            type: string
+          userID:
+            type: string
+          tripEvents:
+            type: array
+            items: 
+              $ref: !Sub
+                - 'https://apigateway.amazonaws.com/restapis/${ApiId}/models/TripEvent'
+                - ApiId: !Ref APIGatewayRestAPI
+          timestamp:
+            type: string
+    DependsOn:
+      - TripEventModel
+      - APIGatewayRestAPI
+  TripRequestModel:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ContentType: application/json
+      Name: TripRequest
+      Schema:
+        title: tripRequest
+        type: object
+        properties:
+          tripId:
+            type: string
+          tripEvent:
+            type: string
+          coordinates: 
+            $ref: !Sub
+              - 'https://apigateway.amazonaws.com/restapis/${ApiId}/models/Coordinates'
+              - ApiId: !Ref APIGatewayRestAPI
+          timestamp:
+            type: string
+    DependsOn:
+      - CoordinatesModel
+      - APIGatewayRestAPI
+  CloudWatchRole:
+    Type: AWS::ApiGateway::Account
+    Properties: 
+      CloudWatchRoleArn: !GetAtt IAMRole.Arn
+    DependsOn:
+      - APIGatewayDeployment
+  CloudwatchDashboard: 
+    Type: AWS::CloudWatch::Dashboard
+    Properties: 
+      DashboardBody: 
+        Fn::Sub: '{
+    "widgets": [
+        {
+            "height": 6,
+            "width": 9,
+            "y": 6,
+            "x": 15,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ApiGateway", "4XXError", "ApiName", "${APIName}", "Resource", "/trip/{tripId}", "Stage", "prod", "Method", "GET", { "visible": false } ],
+                    [ "...", "/trip/events", ".", ".", ".", "POST" ],
+                    [ ".", "5XXError", ".", ".", ".", ".", ".", ".", ".", "." ],
+                    [ "...", "/trip/{tripId}", ".", ".", ".", "GET", { "visible": false } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "API Errors",
+                "period": 5,
+                "stat": "Sum"
+            }
+        },
+        {
+            "height": 6,
+            "width": 24,
+            "y": 0,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ApiGateway", "Count", "ApiName", "${APIName}", "Resource", "/trip/{tripId}", "Stage", "prod", "Method", "GET", { "visible": false } ],
+                    [ "...", "/trip/events", ".", ".", ".", "POST" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "API Endpoint Calls",
+                "period": 5,
+                "stat": "Sum"
+            }
+        },
+        {
+            "height": 6,
+            "width": 15,
+            "y": 6,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/ApiGateway", "Latency", "ApiName", "${APIName}", "Resource", "/trip/{tripId}", "Stage", "prod", "Method", "GET", { "visible": false } ],
+                    [ "...", "/trip/events", ".", ".", ".", "POST" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "API Endpoint Latency",
+                "period": 5,
+                "stat": "Average"
+            }
+        },
+        {
+            "height": 6,
+            "width": 6,
+            "y": 18,
+            "x": 18,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Errors", "FunctionName", "${LambdaTripDBWriter}" ],
+                    [ "...", "${LambdaTripEventWriter}" ],
+                    [ "...", "${LambdaTripReader}" ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Errors",
+                "period": 5,
+                "stat": "Sum"
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 12,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${LambdaTripDBWriter}" ],
+                    [ "...", "${LambdaTripEventWriter}" ],
+                    [ "...", "${LambdaTripReader}", { "visible": false } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Concurrent Executions",
+                "period": 5,
+                "stat": "Average"
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 12,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Duration", "FunctionName", "${LambdaTripDBWriter}" ],
+                    [ "...", "${LambdaTripEventWriter}" ],
+                    [ "...", "${LambdaTripReader}", { "visible": false } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Duration",
+                "period": 5,
+                "stat": "Average"
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 24,
+            "x": 12,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/Kinesis", "IncomingRecords", "StreamName", "${KinesisDataStreamTripEvents}" ],
+                    [ ".", "GetRecords.Records", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 5,
+                "stat": "Sum"
+            }
+        },
+        {
+            "height": 6,
+            "width": 12,
+            "y": 24,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/Kinesis", "GetRecords.Latency", "StreamName", "${KinesisDataStreamTripEvents}" ],
+                    [ ".", "PutRecord.Latency", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "period": 5,
+                "stat": "Average"
+            }
+        },
+        {
+            "height": 6,
+            "width": 18,
+            "y": 18,
+            "x": 0,
+            "type": "metric",
+            "properties": {
+                "metrics": [
+                    [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${DynamoDBTableName}" ],
+                    [ ".", "ConditionalCheckFailedRequests", ".", "." ],
+                    [ ".", "ConsumedReadCapacityUnits", ".", ".", { "visible": false } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "us-east-1",
+                "title": "DynamoDB",
+                "period": 5,
+                "stat": "Average"
+            }
+        }
+    ]
+}'
+      DashboardName: 
+        Ref: EnvironmentName
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - firehose.amazonaws.com
+                - apigateway.amazonaws.com
+                - lambda.amazonaws.com
+                - cloudwatch.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: Policy_api-lambda-db
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:BatchGetItem'
+                  - 'dynamodb:BatchWriteItem'
+                  - 'dynamodb:TagResource'
+                  - 'dynamodb:UntagResource'
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:DeleteItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:UpdateItem'
+                  - 'glue:GetTable'
+                  - 'glue:GetTableVersion'
+                  - 'glue:GetTableVersions'
+                  - 's3:AbortMultipartUpload'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:PutObject'
+                  - 'kinesis:*'
+                  - 'lambda:InvokeFunction'
+                  - 'cloudwatch:*'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:CreateLogGroup'
+                  - 'logs:PutLogEvents'
+                  - 'logs:*'
+                Resource: '*'
+Parameters:
+  LambdaEventStreamWriter:
+    Type: String
+    Default: EventStreamWriter
+  LambdaTripReader:
+    Type: String
+    Default: TripReader
+  LambdaTripEventWriter:
+    Type: String
+    Default: TripEventWriter
+  LambdaTripWriter:
+    Type: String
+    Default: TripWriter
+  LambdaTripDBWriter:
+    Type: String
+    Default: TripDBWriter
+  DynamoDBTableName:
+    Type: String
+    Default: octankTelematicsTrips
+  APIName:
+    Type: String
+    Default: TripsAPI
+  KinesisDataStreamTripEvents:
+    Type: String
+    Default: octankTelematicsTripEvents
+  KinesisDataDeliveryTripEvent:
+    Type: String
+    Default: octankTelematicsTripEventsDelivery
+  S3DataLakeName:
+    Type: String
+    Default: octank.telematics.datalake.demo
+  S3BucketName:
+    Type: String
+    Default: demo-lambda-zips-us-east-2
+  EnvironmentName:
+    Type: String
+    Default: demo
+Outputs:
+  apiGatewayInvokeURL:
+    Value: !Sub https://${APIGatewayRestAPI}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}
