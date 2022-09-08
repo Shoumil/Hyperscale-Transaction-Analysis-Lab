@@ -451,21 +451,13 @@ Resources:
     Type: 'AWS::ApiGateway::Deployment'
     Properties:
       RestApiId: !Ref APIGatewayRestAPI
-      StageName:
-        Ref: EnvironmentName
+      StageDescription:
+        MetricsEnabled: true
+        TracingEnabled: true
+      StageName: 'prod'
     DependsOn:
       - APIGatewayMethod
       - APIGatewayMethodTripIdANY
-  APIGatewayDeploymentStage:
-    Type: AWS::ApiGateway::Stage
-    Properties: 
-      DeploymentId: !Ref APIGatewayDeployment
-      RestApiId: !Ref APIGatewayRestAPI
-      StageName: 'prod'
-      MetricsEnabled: true
-      TracingEnabled: true
-    DependsOn:
-      - APIGatewayDeployment
   APIGatewayPermission:
     Type: 'AWS::Lambda::Permission'
     Properties:
