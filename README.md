@@ -1,14 +1,13 @@
-         ___        ______     ____ _                 _  ___  
-        / \ \      / / ___|   / ___| | ___  _   _  __| |/ _ \ 
-       / _ \ \ /\ / /\___ \  | |   | |/ _ \| | | |/ _` | (_) |
-      / ___ \ V  V /  ___) | | |___| | (_) | |_| | (_| |\__, |
-     /_/   \_\_/\_/  |____/   \____|_|\___/ \__,_|\__,_|  /_/ 
- ----------------------------------------------------------------- 
+         ___        ______   
+        / \ \      / / ___|   
+       / _ \ \ /\ / /\___ \  
+      / ___ \ V  V /  ___) | 
+     /_/   \_\_/\_/  |____/   
+ ----------------------------
 
 
-Hi there! Welcome to AWS Cloud9!
+Hi there! Welcome to Hyperscale-Transaction-Analysis-Lab!
 
-To get started, create some files, play with the terminal,
-or visit https://docs.aws.amazon.com/console/cloud9/ for our documentation.
+To get started, download or copy the the template.yaml file and upload/post into CloudFormation. Also, please make sure your S3 bucket name matches the naming scheme (demo-lambda-zips-${AWS::Region})in the Template as you upload the lambda functions. 
 
-Happy coding!
+A cost breakdown is also included in PDF Format. 
